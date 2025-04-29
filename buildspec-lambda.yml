@@ -5,17 +5,18 @@ phases:
     commands:
       - echo "Packaging Lambda functions…"
       - cd lambda-scripts
-      - echo "Contents of lambda-scripts:"
-      - ls -la
-      - zip -r ../index-photos.zip index-photos.py
-      - zip -r ../search-photos.zip search-photos.py
+      - cd index-photos
+      - zip -r ../index-photos.zip lambda_function.py
+      - cd ..
+      - cd search-photos
+      - zip -r ../search-photos.zip lambda_function.py
       - cd ..
 
   post_build:
     commands:
       - echo "Deploying to Lambda…"
-      - aws lambda update-function-code --function-name index-photos/lambda_function --zip-file fileb://index-photos.zip
-      - aws lambda update-function-code --function-name search-photos/lambda_function --zip-file fileb://search-photos.zip
+      - aws lambda update-function-code --function-name index-photos --zip-file fileb://index-photos.zip
+      - aws lambda update-function-code --function-name search-photos --zip-file fileb://search-photos.zip
 
 artifacts:
   files:
