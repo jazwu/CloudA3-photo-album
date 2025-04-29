@@ -6,10 +6,10 @@ phases:
       - echo "Packaging Lambda functions…"
       - cd lambda-scripts
       - cd index-photos
-      - zip -r ../index-photos.zip lambda_function.py
+      - zip -r ../../index-photos.zip lambda_function.py
       - cd ..
       - cd search-photos
-      - zip -r ../search-photos.zip lambda_function.py
+      - zip -r ../../search-photos.zip lambda_function.py
       - cd ..
       - cd ..
 
