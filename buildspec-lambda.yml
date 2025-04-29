@@ -2,13 +2,19 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      python: 3.13
+      python: 3.12  # Match your Lambda runtime
     commands:
       - pip install awscli
   build:
     commands:
       - echo "Packaging Lambda functions..."
-      - cd lambda-scripts
+      - echo "Current directory: $(pwd)"
+      - echo "Listing all files in the root directory:"
+      - ls -la
+      - echo "Changing to lambda-scripts directory..."
+      - cd lambda-scripts || echo "Failed to change to lambda-scripts directory"
+      - echo "Listing files in lambda-scripts directory:"
+      - ls -la
       - zip -r ../index-photos.zip index-photos.py
       - zip -r ../search-photos.zip search-photos.py
       - cd ..
