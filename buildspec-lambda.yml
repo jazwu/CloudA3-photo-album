@@ -14,8 +14,8 @@ phases:
   post_build:
     commands:
       - echo "Deploying to Lambda…"
-      - aws lambda update-function-code --function-name index-photos --zip-file fileb://index-photos.zip
-      - aws lambda update-function-code --function-name search-photos --zip-file fileb://search-photos.zip
+      - aws lambda update-function-code --function-name index-photos/lambda_function --zip-file fileb://index-photos.zip
+      - aws lambda update-function-code --function-name search-photos/lambda_function --zip-file fileb://search-photos.zip
 
 artifacts:
   files:
