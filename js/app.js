@@ -122,12 +122,14 @@ document.addEventListener('DOMContentLoaded', function() {
         // Read file as binary data
         const reader = new FileReader();
         reader.onload = function(e) {
-            const fileData = e.target.result;
+            const arrayBuffer = e.target.result;
+            const binaryData = new Uint8Array(arrayBuffer);
             
             // Call API
-            apigClient.uploadPut(params, fileData, {
+            apigClient.uploadPut(params, binaryData, {
                 headers: {
                     'Content-Type': 'image/jpeg',
+                    'Accept': 'application/json',
                 }
             })
             .then(function(result) {
