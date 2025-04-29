@@ -2,7 +2,7 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      python: 3.8  # Adjust to match your Lambda runtime
+      python: 3.13  # Adjust to match your Lambda runtime
     commands:
       - pip install awscli  # Install AWS CLI for deployment
   build:
