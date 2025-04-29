@@ -1,47 +1,59 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Voice-Controlled-Web-Album (SAM)
+Description: Voice-Controlled Web Album (SAM)
 
 Globals:
   Function:
     Runtime: python3.9
-    Timeout: 20
     Architectures:
       - x86_64
+    Timeout: 20
+    Tracing:
+      Mode: Active
 
 Resources:
 
   #####################################
-  #  API Gateway (single SAM RestApi) #
+  #      API Gateway (with CORS)      #
   #####################################
   PhotoApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: PhotoApi
+      Name: AIPhotoSearchNewApi
       StageName: prod
       Cors:
         AllowMethods: "'GET,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
 
   #####################################
-  #  IndexPhotos Lambda + GET Path   #
+  #   Index-Photos Lambda + GET /index-photos
   #####################################
   IndexPhotosFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: index-photos
+      FunctionName: index-photo-new
       CodeUri:
         Bucket: photostore2
         Key: index-photo.zip
       Handler: lambda_function.lambda_handler
       Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref PhotoStorageBucket
-        - RekognitionReadOnlyAccess
-        - OpenSearchServiceReadOnlyAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub "arn:aws:s3:::photo-app-photo-bucket/*"
+            - Effect: Allow
+              Action:
+                - rekognition:*
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - es:*
+              Resource: "*"
       Events:
-        GetIndexPhotos:
+        IndexPhotos:
           Type: Api
           Properties:
             RestApiId: !Ref PhotoApi
@@ -49,25 +61,107 @@ Resources:
             Method: get
 
   #####################################
-  #  SearchPhotos Lambda + GET Path  #
+  #  Search-Photos Lambda + GET /search-photos
   #####################################
   SearchPhotosFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: search-photos
+      FunctionName: lambda2-new
       CodeUri:
         Bucket: photostore2
         Key: lambda2.zip
       Handler: lambda_function.lambda_handler
       Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref PhotoStorageBucket
-        - RekognitionReadOnlyAccess
-        - OpenSearchServiceReadOnlyAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "arn:aws:s3:::photo-app-photo-bucket/*"
+            - Effect: Allow
+              Action:
+                - lex:*
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - es:*
+              Resource: "*"
       Events:
-        GetSearchPhotos:
+        SearchPhotos:
           Type: Api
           Properties:
             RestApiId: !Ref PhotoApi
             Path: /search-photos
             Method: get
+
+  ###################################
+  #   Front-end S3 Bucket (Website) #
+  ###################################
+  FrontEndBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: photo-app-frontend
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  FrontEndBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontEndBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${FrontEndBucket.Arn}/*"
+
+  ########################################
+  # Private Photo Storage S3 Bucket      #
+  ########################################
+  PhotoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: photo-app-photo-bucket
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  ########################################
+  #      OpenSearch (Elasticsearch)      #
+  ########################################
+  OpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: photo-new
+      EngineVersion: 'Elasticsearch_7.10'
+      ClusterConfig:
+        InstanceType: t2.small.search
+        InstanceCount: 1
+      EBSOptions:
+        EBSEnabled: true
+        VolumeType: gp2
+        VolumeSize: 10
+
+Outputs:
+
+  FrontEndWebsiteURL:
+    Description: "Public URL for the front-end website"
+    Value: !GetAtt FrontEndBucket.WebsiteURL
+
+  ApiEndpoint:
+    Description: "Base URL for the Photo API"
+    Value: !Sub "https://${PhotoApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  PhotoBucketName:
+    Description: "Name of the private photo storage bucket"
+    Value: !Ref PhotoBucket
+
+  OpenSearchEndpoint:
+    Description: "Endpoint of the OpenSearch domain"
+    Value: !GetAtt OpenSearchDomain.DomainEndpoint
