@@ -1,167 +1,450 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
-Description: Voice-Controlled Web Album (SAM)
-
-Globals:
-  Function:
-    Runtime: python3.9
-    Architectures:
-      - x86_64
-    Timeout: 20
-    Tracing:
-      Mode: Active
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CloudFormation template for setting up the essential infrastructure for the Photo Album app, including two Lambda functions with files, an API Gateway REST API, and two S3 buckets (one for storage, one for frontend hosting). All logical IDs are unique to avoid conflicts with existing resources.
 
 Resources:
-
-  #####################################
-  #      API Gateway (with CORS)      #
-  #####################################
-  PhotoApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      Name: AIPhotoSearchNewApi
-      StageName: prod
-      Cors:
-        AllowMethods: "'GET,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'*'"
-
-  #####################################
-  #   Index-Photos Lambda + GET /index-photos
-  #####################################
-  IndexPhotosFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: index-photo-new
-      CodeUri:
-        Bucket: photostore2
-        Key: index-photo.zip
-      Handler: lambda_function.lambda_handler
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - s3:GetObject
-                - s3:PutObject
-              Resource: !Sub "arn:aws:s3:::photo-app-photo-bucket/*"
-            - Effect: Allow
-              Action:
-                - rekognition:*
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - es:*
-              Resource: "*"
-      Events:
-        IndexPhotos:
-          Type: Api
-          Properties:
-            RestApiId: !Ref PhotoApi
-            Path: /index-photos
-            Method: get
-
-  #####################################
-  #  Search-Photos Lambda + GET /search-photos
-  #####################################
-  SearchPhotosFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: lambda2-new
-      CodeUri:
-        Bucket: photostore2
-        Key: lambda2.zip
-      Handler: lambda_function.lambda_handler
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - s3:GetObject
-              Resource: !Sub "arn:aws:s3:::photo-app-photo-bucket/*"
-            - Effect: Allow
-              Action:
-                - lex:*
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - es:*
-              Resource: "*"
-      Events:
-        SearchPhotos:
-          Type: Api
-          Properties:
-            RestApiId: !Ref PhotoApi
-            Path: /search-photos
-            Method: get
-
-  ###################################
-  #   Front-end S3 Bucket (Website) #
-  ###################################
-  FrontEndBucket:
+  # S3 Buckets
+  PhotoStorageBucketCF:
+    Type: AWS::S3::Bucket
+  PhotoFrontendBucketCF:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: photo-app-frontend
-      AccessControl: PublicRead
       WebsiteConfiguration:
         IndexDocument: index.html
-        ErrorDocument: index.html
 
-  FrontEndBucketPolicy:
-    Type: AWS::S3::BucketPolicy
+  LambdaExecutionRoleCF:
+    Type: AWS::IAM::Role
     Properties:
-      Bucket: !Ref FrontEndBucket
-      PolicyDocument:
-        Version: '2012-10-17'
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
         Statement:
-          - Sid: PublicReadGetObject
-            Effect: Allow
-            Principal: "*"
-            Action: s3:GetObject
-            Resource: !Sub "${FrontEndBucket.Arn}/*"
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-  ########################################
-  # Private Photo Storage S3 Bucket      #
-  ########################################
-  PhotoBucket:
-    Type: AWS::S3::Bucket
+  # Lambda Functions
+  LambdaIndexPhotosCF:
+    Type: AWS::Lambda::Function
     Properties:
-      BucketName: photo-app-photo-bucket
-      AccessControl: Private
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
+      FunctionName: index-photos-cf
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRoleCF.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          import base64
 
-  ########################################
-  #      OpenSearch (Elasticsearch)      #
-  ########################################
-  OpenSearchDomain:
-    Type: AWS::OpenSearchService::Domain
+          http = urllib3.PoolManager()
+          USERNAME = os.environ.get('ES_USERNAME','')
+          PASSWORD = os.environ.get('ES_PASSWORD','')
+          auth_header = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
+
+          host = os.environ.get('ES_ENDPOINT','')
+          index = 'photos'
+          url = host + '/' + index + '/_doc'
+
+          # Initialize AWS clients
+          rekognition = boto3.client('rekognition')
+          s3 = boto3.client('s3')
+
+          def lambda_handler(event, context):
+              try:
+                  responses = []
+                  
+                  # Process each record from the S3 event
+                  for record in event['Records']:
+                      # Extract bucket and key information from the S3 PUT event (E1)
+                      bucket = record['s3']['bucket']['name']
+                      object_key = record['s3']['object']['key'].replace('+', ' ')
+                      
+                      # Step i: Retrieve S3 metadata using head_object method
+                      s3_metadata = s3.head_object(
+                          Bucket=bucket,
+                          Key=object_key
+                      )
+                      print(f"Object exists: s3://{bucket}/{object_key}")
+                      
+                      # Create the labels array (A1)
+                      labels_array = []
+                      
+                      # Check if custom labels exist in the x-amz-meta-customLabels metadata field
+                      if 'Metadata' in s3_metadata and 'customlabels' in s3_metadata['Metadata']:
+                          # Add the custom labels to the labels array
+                          custom_labels = [label.strip().lower() for label in s3_metadata['Metadata']['customlabels'].split(',')]
+                          labels_array = custom_labels
+
+                      # Step ii: Use Rekognition to detect labels in the image
+                      rekognition_response = rekognition.detect_labels(
+                          Image={
+                              'S3Object': {
+                                  'Bucket': bucket,
+                                  'Name': object_key
+                              }
+                          },
+                          MaxLabels=100,
+                          MinConfidence=70
+                      )
+                      
+                      detected_labels = [label['Name'].lower() for label in rekognition_response['Labels']]
+                      
+                      # Step iii: Append Rekognition detected labels to the labels array
+                      labels_array = list(set(labels_array + detected_labels))  # Remove duplicates
+                      
+                      # Create timestamp for ElasticSearch
+                      created_timestamp = s3_metadata.get('LastModified', '').isoformat() if 'LastModified' in s3_metadata else None
+                      if not created_timestamp:
+                          from datetime import datetime
+                          created_timestamp = datetime.now().isoformat()
+                      
+                      # Create JSON object for ElasticSearch
+                      es_document = {
+                          'objectKey': object_key,
+                          'bucket': bucket,
+                          'createdTimestamp': created_timestamp,
+                          'labels': labels_array
+                      }
+                      
+                      # Store the document in ElasticSearch index "photos"
+                      r = http.request('POST', url, body=json.dumps(es_document).encode("utf-8"), headers={'Content-Type': 'application/json', 'Authorization': f'Basic {auth_header}'})
+                      r_text = r.data.decode("utf-8").strip()
+                      r_json = json.loads(r_text)
+
+                      # Create the response and add some extra content to support CORS
+                      response = {
+                          'statusCode': 200,
+                          'headers': {
+                              "Access-Control-Allow-Origin": '*'
+                          },
+                          'body': json.dumps({
+                              'message': 'Image processed successfully',
+                              'id': r_json['_id'],
+                              'labels': labels_array
+                          })
+                      }
+                      
+                      responses.append(response)
+                  
+                  return responses
+                  
+              except Exception as e:
+                  print(f'Error processing image: {str(e)}')
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({
+                          'message': 'Error processing image',
+                          'error': str(e)
+                      })
+                  }
+
+  LambdaSearchPhotosCF:
+    Type: AWS::Lambda::Function
     Properties:
-      DomainName: photo-new
-      EngineVersion: 'Elasticsearch_7.10'
-      ClusterConfig:
-        InstanceType: t2.small.search
-        InstanceCount: 1
-      EBSOptions:
-        EBSEnabled: true
-        VolumeType: gp2
-        VolumeSize: 10
+      FunctionName: search-photos-cf
+      Runtime: python3.9
+      Handler: lambda_handler
+      Role: !GetAtt LambdaExecutionRoleCF.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          import base64
+
+          # Initialize AWS clients
+          lex = boto3.client('lexv2-runtime')
+          BOT_ID = os.environ.get('LEX_BOT_ID','')
+          BOT_ALIAS_ID = os.environ.get('LEX_BOT_ALIAS_ID','')
+
+          # Initialize Elasticsearch client
+          http = urllib3.PoolManager()
+          USERNAME = os.environ.get('ES_USERNAME','')
+          PASSWORD = os.environ.get('ES_PASSWORD','')
+          auth_header = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
+
+          host = os.environ.get('ES_ENDPOINT','')
+          index = 'photos'
+          url = host + '/' + index + '/_search'
+
+          def expand_keywords_with_singular_and_plural(keywords):
+              expanded_keywords = []
+              
+              for keyword in keywords:
+                  expanded_keywords.append(keyword)
+                  
+                  # Convert plural to singular
+                  if keyword.endswith('s'):
+                      # Simple plural: cats -> cat
+                      expanded_keywords.append(keyword[:-1])
+                      
+                      # Words ending in 'ies': butterflies -> butterfly
+                      if keyword.endswith('ies'):
+                          expanded_keywords.append(keyword[:-3] + 'y')
+                      
+                      # Words ending in 'es': beaches -> beach
+                      elif keyword.endswith('es'):
+                          expanded_keywords.append(keyword[:-2])
+                  
+                  # Convert singular to plural
+                  else:
+                      # Simple singular: cat -> cats
+                      expanded_keywords.append(keyword + 's')
+                      
+                      # Words ending in 'y': butterfly -> butterflies
+                      if keyword.endswith('y') and not is_vowel(keyword[-2]):
+                          expanded_keywords.append(keyword[:-1] + 'ies')
+                      
+                      # Words ending in specific consonants: beach -> beaches
+                      elif keyword.endswith(('sh', 'ch', 's', 'x', 'z')):
+                          expanded_keywords.append(keyword + 'es')
+                      
+                      # Words ending in 'f' or 'fe': wolf -> wolves, knife -> knives
+                      elif keyword.endswith('f'):
+                          expanded_keywords.append(keyword[:-1] + 'ves')
+                      elif keyword.endswith('fe'):
+                          expanded_keywords.append(keyword[:-2] + 'ves')
+              
+              return list(set(expanded_keywords))
+
+
+          def lambda_handler(event, context):
+
+              try:
+                  # Step i: Get the query from the event
+                  query = event['queryStringParameters'].get('q', '')
+                  
+                  if not query:
+                      return {
+                          'statusCode': 400,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          },
+                          'body': json.dumps({
+                              'message': 'Missing query parameter',
+                              'results': []
+                          })
+                      }
+                  print("Query:", query)
+                  
+                  # Disambiguate the query using Amazon Lex bot
+                  lex_response = lex.recognize_text(
+                      botId=BOT_ID,
+                      botAliasId=BOT_ALIAS_ID,
+                      localeId='en_US',
+                      sessionId='search-photos-session',
+                      text=query
+                  )
+
+                  print("Lex response:", lex_response)
+                  
+                  # Step ii: Extract keywords from Lex response
+                  keywords = []
+                  
+                  # Check if we have slots in the Lex response
+                  if 'slots' in lex_response.get('interpretations', [{}])[0].get('intent', {}):
+                      slots = lex_response['interpretations'][0]['intent']['slots']
+                      
+                      # Extract all non-null slots as keywords
+                      for slot_name, slot_value in slots.items():
+                          if slot_value and 'value' in slot_value:
+                              # Add the keyword to our list
+                              keyword = slot_value['value']['interpretedValue'].lower()
+                              keywords.append(keyword)
+                  
+                  # If no keywords were found, return empty results
+                  if not keywords:
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          },
+                          'body': json.dumps({
+                              'message': 'No valid keywords found in query',
+                              'results': []
+                          })
+                      }
+                  
+                  # Expand keywords with singular and plural forms
+                  keywords = expand_keywords_with_singular_and_plural(keywords)
+
+                  print("Keywords:", keywords)
+                  
+                  # Build Elasticsearch query using keywords
+                  es_query = {
+                      'query': {
+                          'bool': {
+                              'should': [
+                                  {'match': {'labels': keyword}} for keyword in keywords
+                              ],
+                              'minimum_should_match': 1
+                          }
+                      }
+                  }
+                  
+                  # Execute search against the photos index
+                  response = http.request(
+                      'GET', url, headers={'Authorization': f'Basic {auth_header}', "Content-Type": "application/json",},
+                      body=json.dumps(es_query).encode('utf-8')
+                  )
+                  response_text = response.data.decode("utf-8").strip()
+
+                  if not response_text:  # If response is empty
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          },
+                          'body': json.dumps({
+                              'message': 'No results found',
+                              'results': []
+                          })
+                      }
+                  
+                  es_response = json.loads(response_text)
+
+                  print("Elasticsearch response:", es_response)
+                  
+                  # Transform Elasticsearch results into API response format
+                  results = []
+                  for hit in es_response['hits']['hits']:
+                      source = hit['_source']
+                      
+                      # Construct S3 URL for the image
+                      s3_url = f"https://{source['bucket']}.s3.amazonaws.com/{source['objectKey']}"
+                      
+                      # Add the result to our response
+                      result = {
+                          'url': s3_url,
+                          'labels': source['labels']
+                      }
+                      results.append(result)
+                  
+                  # Return the search results
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      },
+                      'body': json.dumps({
+                          'results': results
+                      })
+                  }
+                  
+              except Exception as e:
+                  print(f'Error searching photos: {str(e)}')
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      },
+                      'body': json.dumps({
+                          'message': f'Error searching photos: {str(e)}',
+                          'results': []
+                      })
+                  }
+
+  # API Gateway
+  PhotoApiGatewayCF:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: PhotoApiCF
+      Description: Photo API
+
+  PhotoApiResourcePhotos:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PhotoApiGatewayCF
+      ParentId: !GetAtt PhotoApiGatewayCF.RootResourceId
+      PathPart: photos
+
+  PhotoApiMethodPutPhotos:
+    Type: AWS::ApiGateway::Method
+    DependsOn: LambdaInvokePermissionIndexCF
+    Properties:
+      RestApiId: !Ref PhotoApiGatewayCF
+      ResourceId: !Ref PhotoApiResourcePhotos
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Join:
+            - ""
+            - - "arn:aws:apigateway:"
+              - !Ref "AWS::Region"
+              - ":lambda:path/2015-03-31/functions/"
+              - !GetAtt LambdaIndexPhotosCF.Arn
+              - "/invocations"
+
+  PhotoApiResourceSearch:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PhotoApiGatewayCF
+      ParentId: !GetAtt PhotoApiGatewayCF.RootResourceId
+      PathPart: search
+
+  PhotoApiMethodGetSearch:
+    Type: AWS::ApiGateway::Method
+    DependsOn: LambdaInvokePermissionSearchCF
+    Properties:
+      RestApiId: !Ref PhotoApiGatewayCF
+      ResourceId: !Ref PhotoApiResourceSearch
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Join:
+            - ""
+            - - "arn:aws:apigateway:"
+              - !Ref "AWS::Region"
+              - ":lambda:path/2015-03-31/functions/"
+              - !GetAtt LambdaSearchPhotosCF.Arn
+              - "/invocations"
+
+  # Permissions
+  LambdaInvokePermissionIndexCF:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaIndexPhotosCF.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PhotoApiGatewayCF}/*/PUT/photos
+
+  LambdaInvokePermissionSearchCF:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaSearchPhotosCF.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PhotoApiGatewayCF}/*/GET/search
+
+  PhotoApiDeploymentCF:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PhotoApiMethodPutPhotos
+      - PhotoApiMethodGetSearch
+    Properties:
+      RestApiId: !Ref PhotoApiGatewayCF
+      StageName: dev
 
 Outputs:
+  PhotoStorageBucket:
+    Description: "Name of the storage S3 bucket"
+    Value: !Ref PhotoStorageBucketCF
 
-  FrontEndWebsiteURL:
-    Description: "Public URL for the front-end website"
-    Value: !GetAtt FrontEndBucket.WebsiteURL
+  PhotoFrontendBucketURL:
+    Description: "Frontend website endpoint"
+    Value: !Sub "http://${PhotoFrontendBucketCF}.s3-website.${AWS::Region}.amazonaws.com"
 
-  ApiEndpoint:
-    Description: "Base URL for the Photo API"
-    Value: !Sub "https://${PhotoApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
-
-  PhotoBucketName:
-    Description: "Name of the private photo storage bucket"
-    Value: !Ref PhotoBucket
-
-  OpenSearchEndpoint:
-    Description: "Endpoint of the OpenSearch domain"
-    Value: !GetAtt OpenSearchDomain.DomainEndpoint
+  ApiGatewayInvokeURL:
+    Description: "API base URL"
+    Value: !Sub "https://${PhotoApiGatewayCF}.execute-api.${AWS::Region}.amazonaws.com/dev"
