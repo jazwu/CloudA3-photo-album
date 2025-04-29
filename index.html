@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Album</title>
+    <!-- Dependency Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/aws-sdk/2.1013.0/aws-sdk.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/url-template/2.0.8/url-template.min.js"></script>
+    
+    <!-- api gateway generated sdk -->
+    <script src="js/api-gateway-sdk/lib/axios/dist/axios.standalone.js"></script>
+    <script src="js/api-gateway-sdk/lib/CryptoJS/rollups/crypto-js.js"></script>
+    <script src="js/api-gateway-sdk/lib/CryptoJS/rollups/sha256.js"></script>
+    <script src="js/api-gateway-sdk/lib/CryptoJS/components/hmac.js"></script>
+    <script src="js/api-gateway-sdk/lib/CryptoJS/components/enc-base64.js"></script>
+    <script src="js/api-gateway-sdk/lib/url-template/url-template.js"></script>
+    <script src="js/api-gateway-sdk/lib/apiGatewayCore/sigV4Client.js"></script>
+    <script src="js/api-gateway-sdk/lib/apiGatewayCore/apiGatewayClient.js"></script>
+    <script src="js/api-gateway-sdk/lib/apiGatewayCore/simpleHttpClient.js"></script>
+    <script src="js/api-gateway-sdk/lib/apiGatewayCore/utils.js"></script>
+
+    <script src="js/api-gateway-sdk/apigClient.js"></script>
+    
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <h1>Photo Search and Upload</h1>
+    
+    <div class="section">
+        <h2>Search Photos</h2>
+        <input type="text" id="searchQuery" placeholder="Enter search term...">
+        <button id="searchButton">Search</button>
+        <div id="searchResults" class="results"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Upload Photo</h2>
+        <input type="file" id="photoUpload" accept="image/*">
+        <p>Add up to 2 custom labels (optional):</p>
+        <input type="text" id="label1" placeholder="Label 1">
+        <input type="text" id="label2" placeholder="Label 2">
+        <button id="uploadButton">Upload</button>
+        <div id="statusMessage" class="hidden"></div>
+    </div>
+
+    <!-- Placed at the end of the document so the pages load faster -->
+    <script src="js/app.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+</body>
+</html>
