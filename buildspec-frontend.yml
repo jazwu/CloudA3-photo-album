@@ -1,0 +1,9 @@
+version: 0.2
+phases:
+  build:
+    commands:
+      - echo "No build step needed for simple HTML/CSS/JS"
+  post_build:
+    commands:
+      - echo "Deploying to S3 bucket..."
+      - aws s3 sync ./ s3://your-frontend-bucket-name/ --delete --exclude "*.yml" --exclude ".git/*" --exclude "README.md" --exclude ".gitignore" --exclude "lambda-scripts/*"
