@@ -2,14 +2,16 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      python: 3.13  # Adjust to match your Lambda runtime
+      python: 3.13
     commands:
-      - pip install awscli  # Install AWS CLI for deployment
+      - pip install awscli
   build:
     commands:
       - echo "Packaging Lambda functions..."
-      - zip -r index-photos.zip index-photos.py  # Package index-photos Lambda
-      - zip -r search-photos.zip search-photos.py  # Package search-photos Lambda
+      - cd lambda-scripts
+      - zip -r ../index-photos.zip index-photos.py
+      - zip -r ../search-photos.zip search-photos.py
+      - cd ..
   post_build:
     commands:
       - echo "Deploying to Lambda..."
