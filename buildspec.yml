@@ -1,0 +1,21 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.8  # Adjust to match your Lambda runtime
+    commands:
+      - pip install awscli  # Install AWS CLI for deployment
+  build:
+    commands:
+      - echo "Packaging Lambda functions..."
+      - zip -r index-photos.zip index-photos.py  # Package index-photos Lambda
+      - zip -r search-photos.zip search-photos.py  # Package search-photos Lambda
+  post_build:
+    commands:
+      - echo "Deploying to Lambda..."
+      - aws lambda update-function-code --function-name index-photos --zip-file fileb://index-photos.zip
+      - aws lambda update-function-code --function-name search-photos --zip-file fileb://search-photos.zip
+artifacts:
+  files:
+    - index-photos.zip
+    - search-photos.zip
