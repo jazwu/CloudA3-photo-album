@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Voice-Controlled-Web-Album (SAM)
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 20
+    Architectures:
+      - x86_64
+
+Resources:
+
+  #####################################
+  #  API Gateway (single SAM RestApi) #
+  #####################################
+  PhotoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: PhotoApi
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowOrigin: "'*'"
+
+  #####################################
+  #  IndexPhotos Lambda + GET Path   #
+  #####################################
+  IndexPhotosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: index-photos
+      CodeUri:
+        Bucket: photostore2
+        Key: index-photo.zip
+      Handler: lambda_function.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref PhotoStorageBucket
+        - RekognitionReadOnlyAccess
+        - OpenSearchServiceReadOnlyAccess
+      Events:
+        GetIndexPhotos:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PhotoApi
+            Path: /index-photos
+            Method: get
+
+  #####################################
+  #  SearchPhotos Lambda + GET Path  #
+  #####################################
+  SearchPhotosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: search-photos
+      CodeUri:
+        Bucket: photostore2
+        Key: lambda2.zip
+      Handler: lambda_function.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref PhotoStorageBucket
+        - RekognitionReadOnlyAccess
+        - OpenSearchServiceReadOnlyAccess
+      Events:
+        GetSearchPhotos:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PhotoApi
+            Path: /search-photos
+            Method: get
