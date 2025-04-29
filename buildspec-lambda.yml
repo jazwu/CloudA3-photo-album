@@ -1,23 +1,14 @@
 version: 0.2
 
 phases:
-  install:
-    runtime-versions:
-      python: 3.12
-    commands:
-      - echo "Installing AWS CLI…"
-      - pip install awscli --upgrade
-      - echo "Installing Python deps into lambda-scripts/…"
-      - if [ -f lambda-scripts/requirements.txt ]; then pip install -r lambda-scripts/requirements.txt -t lambda-scripts; fi
-
   build:
     commands:
       - echo "Packaging Lambda functions…"
       - cd lambda-scripts
       - echo "Contents of lambda-scripts:"
       - ls -la
-      - zip -r ../index-photos.zip index-photos.py *.py
-      - zip -r ../search-photos.zip search-photos.py *.py
+      - zip -r ../index-photos.zip index-photos.py
+      - zip -r ../search-photos.zip search-photos.py
       - cd ..
 
   post_build:
