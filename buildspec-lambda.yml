@@ -11,6 +11,7 @@ phases:
       - cd search-photos
       - zip -r ../search-photos.zip lambda_function.py
       - cd ..
+      - cd ..
 
   post_build:
     commands:
